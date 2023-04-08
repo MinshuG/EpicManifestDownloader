@@ -8,6 +8,7 @@ pyqt6 = "*"
 legendary-gl = "*"
 
 [dev-packages]
+auto-py-to-exe = "*"
 
 [requires]
 python_version = "3.9"

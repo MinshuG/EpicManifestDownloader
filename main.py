@@ -1,6 +1,5 @@
-from asyncio import Queue
+import multiprocessing
 import os
-import time
 import sys
 import logging
 
@@ -198,6 +197,7 @@ class LoggerStream(QObject):
         pass
 
 if __name__ == '__main__':
+    multiprocessing.freeze_support()
     app = QApplication([])
     window = MainWindow()
     sys.exit(app.exec())
