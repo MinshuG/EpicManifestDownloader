@@ -2,6 +2,7 @@ import multiprocessing
 import os
 import sys
 import logging
+import re
 
 from PyQt6.QtCore import QThread, pyqtSignal, QObject
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QFileDialog, QHBoxLayout, QVBoxLayout, QProgressBar, QTextEdit
@@ -25,23 +26,33 @@ class ThisWorksSoo:
 
 class DownloadThread(QThread):
     progress_signal = pyqtSignal(float, float, float, float)
-    
+    url_regex = "^https?:\\/\\/(?:www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b(?:[-a-zA-Z0-9()@:%_\\+.~#?&\\/=]*)$"
+
     def __init__(self, url, work: WorkInfo):
         QThread.__init__(self)
         self.url = url
         self.work = work
         self.progress_queue = ThisWorksSoo(self.update_progress)
         self.manager = DLManager(self.work.DownloadLocation, self.work.BaseUrl, os.path.join(self.work.DownloadLocation, ".cache"), self.progress_queue, resume_file=os.path.join(self.work.DownloadLocation, ".resumedata"))
-        # breakpoint()
+        is_url = re.match(self.url_regex, self.work.Manifest)
+        logging.getLogger().info("Manifest URL Detected." if is_url else "")
 
     def run(self):
+        is_url = re.match(self.url_regex, self.work.Manifest)
         # download_result = download_file(self.url, self.dest_file, progress_callback=self.update_progress)
-        with open(self.work.Manifest, "rb") as f:
+        if is_url:
+            logging.getLogger().info("Downloading manifest from URL...")
+            import requests
+            resp = requests.get(self.work.Manifest, stream=True)
+            data = resp.content
+        else:
+            f =  open(self.work.Manifest, "rb")
             data = f.read()
-            try:
-                manifest = Manifest.read_all(data)
-            except Exception as e:
-                manifest = JSONManifest.read_all(data)
+
+        try:
+            manifest = Manifest.read_all(data)
+        except Exception as e:
+            manifest = JSONManifest.read_all(data)
 
         self.manager.run_analysis(manifest, None, processing_optimization=False)
         
@@ -71,12 +82,12 @@ class MainWindow(QWidget):
         self.url_label = QLabel("BaseURL:")
         self.url_edit = QLineEdit()
         self.url_edit.setText("https://epicgames-download1.akamaized.net/Builds/Fortnite/CloudDir/")
-        self.manifest_picker_button = QPushButton("Select Manifest...")
-        self.manifest_location_label = QLabel("Manifest Location:")
+        self.manifest_picker_button = QPushButton("Browse")
+        self.manifest_location_label = QLabel("Manifest Location/URL:")
         self.manifest_location_edit = QLineEdit()
         self.download_location_label = QLabel("Download Location:")
         self.download_location_edit = QLineEdit()
-        self.download_location_button = QPushButton("Browse...")
+        self.download_location_button = QPushButton("Browse")
         self.download_button = QPushButton("Download")
         self.progress_bar = QProgressBar()
         self.progress_label = QLabel()
@@ -134,7 +145,7 @@ class MainWindow(QWidget):
         self.show()
     
     def select_manifest(self):
-        manifest_path, _ = QFileDialog.getOpenFileName(self, "Select Manifest to Download")
+        manifest_path, _ = QFileDialog.getOpenFileName(self, "Select Manifest")
         self.manifest_location_edit.setText(manifest_path)
         logging.getLogger().info(f"Selected manifest: {manifest_path}")
         
@@ -154,6 +165,7 @@ class MainWindow(QWidget):
         
         self.download_thread = DownloadThread(url, work)
         self.download_thread.progress_signal.connect(self.update_progress)
+        self.download_thread.finished.connect(self.download_finished)
         self.download_thread.start()
         # disable download button
         self.download_button.setEnabled(False)
@@ -163,6 +175,14 @@ class MainWindow(QWidget):
         self.speed_label.setText(f"Download {speed:.2f} MB/s")
         self.progress_label.setText(f"R/W {read_speed:.2f} MB/s, {write_speed:.2f} MB/s")
         # self.console.append(f"{filename} - {progress_percent:.2f}%")
+
+    def download_finished(self):
+        self.download_button.setEnabled(True)
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Download Finished")
+        self.speed_label.setText("")
+        self.download_thread.manager.running = False # not tested
+        self.download_thread.kill()
 
     def write_to_console(self, text: str):
         text = text[:-1] if text.endswith("\n") else text
